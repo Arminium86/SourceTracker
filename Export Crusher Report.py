@@ -17,6 +17,8 @@ REQUIRED_COLS = {
     "FinalDestinationFullName",
     "FinalDestination.Top",
     "OriginalSource.OpenPit",
+    "OriginalSourceFullName",
+    "SourceFullName",
     "Mining_wetTonnes",
 }
 
@@ -52,6 +54,12 @@ def _to_num0(s: pd.Series) -> pd.Series:
 def _to_num_nan(s: pd.Series) -> pd.Series:
     # keep NaN for grades so we don't turn unknowns into zeros
     return _to_num_series(s)
+
+def _first_path_part(value) -> str:
+    txt = _safe_str(value).strip()
+    if not txt:
+        return ""
+    return txt.split("/", 1)[0].strip()
 
 # ---------- main ----------
 for input_model in input_set.get_all("Input Models"):
@@ -91,7 +99,10 @@ for input_model in input_set.get_all("Input Models"):
 
     # --------- convert types ONCE on df_work ----------
     # Text columns
-    for c in ["Period.Name","SourceParcel","FinalDestinationFullName","FinalDestination.Top","OriginalSource.OpenPit"]:
+    for c in [
+        "Period.Name", "SourceParcel", "FinalDestinationFullName", "FinalDestination.Top",
+        "OriginalSource.OpenPit", "OriginalSourceFullName", "SourceFullName"
+    ]:
         if c in df_work.columns:
             df_work[c] = df_work[c].astype("string")
 
@@ -128,6 +139,8 @@ for input_model in input_set.get_all("Input Models"):
         destination_fullname = row.get("FinalDestinationFullName")
         destination_top = row.get("FinalDestination.Top")
         source_openpit = row.get("OriginalSource.OpenPit")
+        original_source_fullname = row.get("OriginalSourceFullName")
+        source_fullname = row.get("SourceFullName")
 
         # numeric values
         oretypes = {k: float(row.get(k, 0.0) or 0.0) for k in ORETYPE_KEYS if k in df_work.columns}
@@ -170,6 +183,40 @@ for input_model in input_set.get_all("Input Models"):
                 rec[g] = v
 
             records.append(rec)
+
+        # Add "Opening Stockpile Inventory" row when both source names begin with "Stockpiles"
+        if (
+            _first_path_part(original_source_fullname) == "Stockpiles"
+            and _first_path_part(source_fullname) == "Stockpiles"
+        ):
+            total_tracker_value = float(
+                sum(float(row.get(col, 0.0) or 0.0) for col in SourceTracker_cols)
+            )
+            opening_inventory_tonnes = float(txn_wet) - total_tracker_value
+
+            if opening_inventory_tonnes > 0:
+                frac = opening_inventory_tonnes / float(txn_wet)
+                rec = {
+                    "OriginalSource.OpenPit": source_openpit,
+                    "FinalDestination.Top": destination_top,
+                    "OriginalSourceFullName": "Opening Stockpile Inventory",
+                    "Period.Name": period,
+                    "SourceParcel": parcel,
+                    "Mining_wetTonnes": opening_inventory_tonnes,
+                    "FinalDestinationFullName": destination_fullname,
+                }
+
+                # scaled fields
+                for k, v in oretypes.items():
+                    rec[k] = v * frac
+                for k, v in prods.items():
+                    rec[k] = v * frac
+
+                # grades NOT scaled (as per your original logic)
+                for g, v in grades.items():
+                    rec[g] = v
+
+                records.append(rec)
 
     report_df = pd.DataFrame(records)
     handle.log_info(f"Expanded records rows: {len(report_df)}")
