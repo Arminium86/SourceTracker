@@ -9,6 +9,9 @@ import os
 import pandas as pd
 from libblocksmith import TableModel  # ensure imported at top
 
+# toggle to apply/bypass Romblend makeup input
+APPLY_ROMBLEND_MAKEUP = True  # set to False to bypass Romblend makeup adjustments
+
 # ---------- helpers ----------
 def to_num_series(s: pd.Series) -> pd.Series:
     return pd.to_numeric(
@@ -250,11 +253,23 @@ def apply_makeup_logic(initial_in: pd.DataFrame, keep_period: bool = False) -> p
 
 
 # ---------- build outputs ----------
-final = apply_makeup_logic(initial, keep_period=False)
+if APPLY_ROMBLEND_MAKEUP:
+    final = apply_makeup_logic(initial, keep_period=False)
+else:
+    final = initial.copy()
+    final["SourceDirectory"] = str(makeup_df["SourceDirectory"].dropna().iloc[0])
+    final["Mining_wetTonnes"] = pd.to_numeric(final["Mining_wetTonnes"], errors="coerce").fillna(0)
+    final = final[final["Mining_wetTonnes"] > 0].copy()
 
 final_period = None
 if initial_period is not None:
-    final_period = apply_makeup_logic(initial_period, keep_period=True)
+    if APPLY_ROMBLEND_MAKEUP:
+        final_period = apply_makeup_logic(initial_period, keep_period=True)
+    else:
+        final_period = initial_period.copy()
+        final_period["SourceDirectory"] = str(makeup_df["SourceDirectory"].dropna().iloc[0])
+        final_period["Mining_wetTonnes"] = pd.to_numeric(final_period["Mining_wetTonnes"], errors="coerce").fillna(0)
+        final_period = final_period[final_period["Mining_wetTonnes"] > 0].copy()
 
 handle.log_info(f"Rows after removing zero-tonnes: {len(final)}")
 if final_period is not None:
