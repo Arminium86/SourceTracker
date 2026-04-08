@@ -101,7 +101,8 @@ for input_model in input_set.get_all("Input Models"):
     # Text columns
     for c in [
         "Period.Name", "SourceParcel", "FinalDestinationFullName", "FinalDestination.Top",
-        "OriginalSource.OpenPit", "OriginalSourceFullName", "SourceFullName"
+        "OriginalSource.OpenPit", "OriginalSourceFullName", "SourceFullName",
+        "SourceMutexStockpile.StockpileArea"
     ]:
         if c in df_work.columns:
             df_work[c] = df_work[c].astype("string")
@@ -141,6 +142,7 @@ for input_model in input_set.get_all("Input Models"):
         source_openpit = row.get("OriginalSource.OpenPit")
         original_source_fullname = row.get("OriginalSourceFullName")
         source_fullname = row.get("SourceFullName")
+        stockpile_area = _safe_str(row.get("SourceMutexStockpile.StockpileArea")).strip()
 
         # numeric values
         oretypes = {k: float(row.get(k, 0.0) or 0.0) for k in ORETYPE_KEYS if k in df_work.columns}
@@ -199,7 +201,11 @@ for input_model in input_set.get_all("Input Models"):
                 rec = {
                     "OriginalSource.OpenPit": source_openpit,
                     "FinalDestination.Top": destination_top,
-                    "OriginalSourceFullName": "Opening Stockpile Inventory",
+                    "OriginalSourceFullName": (
+                        f"{stockpile_area} - Opening Stockpile Inventory"
+                        if stockpile_area
+                        else "Opening Stockpile Inventory"
+                    ),
                     "Period.Name": period,
                     "SourceParcel": parcel,
                     "Mining_wetTonnes": opening_inventory_tonnes,
