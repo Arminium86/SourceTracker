@@ -32,6 +32,20 @@ def strip_cols(df: pd.DataFrame) -> pd.DataFrame:
     df.columns = [str(c).strip() for c in df.columns]
     return df
 
+def clean_text_series(s: pd.Series) -> pd.Series:
+    return s.astype("string").str.strip()
+
+def source_join_key(s: pd.Series) -> pd.Series:
+    # SourceTracker-derived names in the crusher report can use underscores,
+    # while ROMBLEND makeup inputs can still use slash-delimited model paths.
+    # Some inputs also alternate between Reserves and OpenPit naming. Normalize
+    # those cosmetic differences before joining makeup rows to ROMBLEND rows.
+    return (
+        clean_text_series(s)
+        .str.replace("/", "_", regex=False)
+        .str.replace("Reserves", "OpenPit", regex=False)
+    )
+
 
 # ---------- pick the two inputs ----------
 crusher_df = None
@@ -123,17 +137,31 @@ mk = mk[mk["SourceFullName"].notna()].copy()
 mk["Ratio"] = to_num_series(mk["Ratio"])
 
 mk = mk[["SourceFullName", "SourceParcel", "DestinationParcel", "Ratio", "SourceDirectory"]].copy()
-mk["SourceFullName"] = mk["SourceFullName"].astype(str)
-mk["DestinationParcel"] = mk["DestinationParcel"].astype(str)
+for c in ["SourceFullName", "SourceParcel", "DestinationParcel"]:
+    mk[c] = clean_text_series(mk[c])
+mk["SourceJoinKey"] = source_join_key(mk["SourceFullName"])
+mk["DestinationParcelJoinKey"] = clean_text_series(mk["DestinationParcel"])
 
 # ---------- shared transformation function ----------
 def apply_makeup_logic(initial_in: pd.DataFrame, keep_period: bool = False) -> pd.DataFrame:
-    joined = initial_in.merge(
+    initial_join = initial_in.copy()
+    initial_join["SourceJoinKey"] = source_join_key(initial_join["OriginalSourceFullName"])
+    initial_join["SourceParcelJoinKey"] = clean_text_series(initial_join["SourceParcel"])
+
+    romblend_before = int((initial_join["SourceParcelJoinKey"] == "ROMBLEND").sum())
+
+    joined = initial_join.merge(
         mk,
-        left_on=["OriginalSourceFullName", "SourceParcel"],
-        right_on=["SourceFullName", "DestinationParcel"],
+        left_on=["SourceJoinKey", "SourceParcelJoinKey"],
+        right_on=["SourceJoinKey", "DestinationParcelJoinKey"],
         how="left",
         suffixes=("_cr", "_mk"),
+    )
+
+    matched_romblend = int(((joined["SourceParcelJoinKey"] == "ROMBLEND") & joined["Ratio"].notna()).sum())
+    handle.log_info(
+        f"ROMBLEND makeup matches ({'period' if keep_period else 'summary'} grain): "
+        f"{matched_romblend} joined rows from {romblend_before} ROMBLEND input rows"
     )
 
     # resolve left SourceParcel column name after merge
@@ -169,10 +197,14 @@ def apply_makeup_logic(initial_in: pd.DataFrame, keep_period: bool = False) -> p
             joined[f"{c}_adjusted"] = joined[c]
             joined.loc[has_ratio, f"{c}_adjusted"] = joined.loc[has_ratio, c] * joined.loc[has_ratio, "Ratio"]
 
-    # SourceParcelUpdated: if SourceParcel == ROMBLEND then use mk.SourceParcel (if present) else keep
-    joined["SourceParcelUpdated"] = joined[left_sp]
+    # SourceParcelUpdated: only replace ROMBLEND when a makeup parcel is present.
+    # Do not overwrite unmatched ROMBLEND rows with nulls; the fallback below will
+    # then use the dominant non-ROMBLEND parcel for the same source/destination.
+    joined["SourceParcelUpdated"] = clean_text_series(joined[left_sp])
     if mk_sp is not None:
-        joined.loc[joined[left_sp] == "ROMBLEND", "SourceParcelUpdated"] = joined.loc[joined[left_sp] == "ROMBLEND", mk_sp]
+        replacement = clean_text_series(joined[mk_sp])
+        replace_mask = (joined["SourceParcelJoinKey"] == "ROMBLEND") & replacement.notna() & (replacement != "")
+        joined.loc[replace_mask, "SourceParcelUpdated"] = replacement.loc[replace_mask]
 
     # weighted grades based on ParcelTonnesToDestination
     joined["fe_weighted"] = joined["Mining_grades_fe"] * joined["ParcelTonnesToDestination"]
