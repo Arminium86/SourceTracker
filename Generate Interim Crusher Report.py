@@ -159,8 +159,12 @@ def apply_makeup_logic(initial_in: pd.DataFrame, keep_period: bool = False) -> p
     joined["ParcelTonnesToDestination"] = joined["Mining_wetTonnes"]
     joined.loc[has_ratio, "ParcelTonnesToDestination"] = joined.loc[has_ratio, "Mining_wetTonnes"] * joined.loc[has_ratio, "Ratio"]
 
-    # adjusted prod cols
-    for c in prod_cols:
+    # adjusted additive tonne columns
+    # When a ROMBLEND row is split by makeup Ratio, all additive tonne fields
+    # must be split by the same ratio as Mining_wetTonnes. Leaving oretypes
+    # unscaled here can make oretype tonnes exceed the output row tonnes.
+    adjusted_tonne_cols = prod_cols + ore_cols
+    for c in adjusted_tonne_cols:
         if c in joined.columns:
             joined[f"{c}_adjusted"] = joined[c]
             joined.loc[has_ratio, f"{c}_adjusted"] = joined.loc[has_ratio, c] * joined.loc[has_ratio, "Ratio"]
@@ -190,19 +194,16 @@ def apply_makeup_logic(initial_in: pd.DataFrame, keep_period: bool = False) -> p
         "mn_weighted": "sum",
         "p_weighted": "sum",
     }
-    for c in prod_cols:
+    for c in adjusted_tonne_cols:
         adj = f"{c}_adjusted"
         if adj in joined.columns:
             agg_dict[adj] = "sum"
-    for c in ore_cols:
-        if c in joined.columns:
-            agg_dict[c] = "sum"
 
     agg = joined.groupby(g2).agg(agg_dict).reset_index()
 
-    # rename tonnes + prod back
+    # rename tonnes + adjusted additive tonne columns back
     agg = agg.rename(columns={"ParcelTonnesToDestination": "Mining_wetTonnes"})
-    for c in prod_cols:
+    for c in adjusted_tonne_cols:
         adj = f"{c}_adjusted"
         if adj in agg.columns:
             agg = agg.rename(columns={adj: c})
