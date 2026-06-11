@@ -84,10 +84,10 @@ for input_model in input_set.get_all("Input Models"):
         continue
 
     # Filter to crushers
-    df_work = df[df["Destination.Top"].astype(str).str.strip() == "Crushers"].copy()
+    df_work = df[df["FinalDestination.Top"].astype(str).str.strip() == "Crushers"].copy()
     handle.log_info(f"Row count after Crushers filter: {len(df_work)}")
     if df_work.empty:
-        handle.log_info("SKIP: no rows where Destination.Top == 'Crushers'")
+        handle.log_info("SKIP: no rows where FinalDestination.Top == 'Crushers'")
         continue
 
     # Identify tracker cols
