@@ -80,11 +80,10 @@ for input_model in input_set.get_all("Input Models"):
     if result.shape[1] >= 4:
         result = result.drop(columns=result.columns[3])
         
-    # add source directory column for downstream script
+    # add source directory column for downstream script. Keep the SourceFullName
+    # values already normalized on result above; reassigning from df after sorting
+    # can align on stale row indexes and corrupt makeup source/parcel rows.
     result["SourceDirectory"] = source_directory
-    result["SourceFullName"] = df["SourceFullName"].astype(str).str.replace("Reserves", "OpenPit", regex=False)
-    result["SourceFullName"] = df["SourceFullName"].astype(str).str.replace("/", "_", regex=False)
-   
 
     # Write next to input model
     base = os.path.splitext(source_file_name)[0] if source_file_name else "input_model"
